@@ -11,6 +11,8 @@ using BTCPayServer.Plugins.Monero.RPC.Models;
 
 using Microsoft.Extensions.Logging;
 
+using Monero.Common;
+
 using NBitcoin;
 
 namespace BTCPayServer.Plugins.Monero.Services
@@ -19,8 +21,8 @@ namespace BTCPayServer.Plugins.Monero.Services
     {
         private readonly MoneroLikeConfiguration _moneroLikeConfiguration;
         private readonly EventAggregator _eventAggregator;
-        public ImmutableDictionary<string, JsonRpcClient> DaemonRpcClients;
-        public ImmutableDictionary<string, JsonRpcClient> WalletRpcClients;
+        public ImmutableDictionary<string, MoneroRpcConnection> DaemonRpcClients;
+        public ImmutableDictionary<string, MoneroRpcConnection> WalletRpcClients;
         private readonly ILogger<MoneroRPCProvider> _logger;
 
         private readonly ConcurrentDictionary<string, MoneroLikeSummary> _summaries = new();
@@ -37,11 +39,11 @@ namespace BTCPayServer.Plugins.Monero.Services
             _logger = logger;
             DaemonRpcClients =
                 _moneroLikeConfiguration.MoneroLikeConfigurationItems.ToImmutableDictionary(pair => pair.Key,
-                    pair => new JsonRpcClient(pair.Value.DaemonRpcUri, pair.Value.Username, pair.Value.Password,
+                    pair => new MoneroRpcConnection(pair.Value.DaemonRpcUri, pair.Value.Username, pair.Value.Password,
                         httpClientFactory.CreateClient($"{pair.Key}client")));
             WalletRpcClients =
                 _moneroLikeConfiguration.MoneroLikeConfigurationItems.ToImmutableDictionary(pair => pair.Key,
-                    pair => new JsonRpcClient(pair.Value.InternalWalletRpcUri, "", "",
+                    pair => new MoneroRpcConnection(pair.Value.InternalWalletRpcUri, "", "",
                         httpClientFactory.CreateClient($"{pair.Key}client")));
         }
 
@@ -49,7 +51,7 @@ namespace BTCPayServer.Plugins.Monero.Services
         public bool IsAvailable(string cryptoCode)
         {
             cryptoCode = cryptoCode.ToUpperInvariant();
-            return _summaries.ContainsKey(cryptoCode) && IsAvailable(_summaries[cryptoCode]);
+            return Summaries.ContainsKey(cryptoCode) && IsAvailable(Summaries[cryptoCode]);
         }
 
         private bool IsAvailable(MoneroLikeSummary summary)
@@ -146,9 +148,9 @@ namespace BTCPayServer.Plugins.Monero.Services
                 summary.WalletAvailable = false;
             }
 
-            var changed = !_summaries.ContainsKey(cryptoCode) || IsAvailable(cryptoCode) != IsAvailable(summary);
+            var changed = !Summaries.ContainsKey(cryptoCode) || IsAvailable(cryptoCode) != IsAvailable(summary);
 
-            _summaries.AddOrReplace(cryptoCode, summary);
+            Summaries.AddOrReplace(cryptoCode, summary);
             if (changed)
             {
                 _eventAggregator.Publish(new MoneroDaemonStateChange() { Summary = summary, CryptoCode = cryptoCode });
