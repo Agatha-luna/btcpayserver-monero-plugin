@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -13,7 +12,6 @@ using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.Plugins.Monero.Configuration;
 using BTCPayServer.Plugins.Monero.Payments;
-using BTCPayServer.Plugins.Monero.RPC.Models;
 using BTCPayServer.Plugins.Monero.Services;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
@@ -22,6 +20,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.Extensions.Localization;
+
+using Monero.Wallet.Rpc;
 
 namespace BTCPayServer.Plugins.Monero.Controllers
 {
@@ -103,10 +103,10 @@ namespace BTCPayServer.Plugins.Monero.Controllers
             _MoneroRpcProvider.Summaries.TryGetValue(cryptoCode, out var summary);
             _MoneroLikeConfiguration.MoneroLikeConfigurationItems.TryGetValue(cryptoCode,
                 out var configurationItem);
-            var accounts = accountsResponse?.SubaddressAccounts?.Select(account =>
+            var accounts = accountsResponse?.Accounts.Select(account =>
                 new SelectListItem(
                     $"{account.AccountIndex} - {(string.IsNullOrEmpty(account.Label) ? "No label" : account.Label)}",
-                    account.AccountIndex.ToString(CultureInfo.InvariantCulture)));
+                    account.AccountIndex.ToString()));
 
             var settlementThresholdChoice = MoneroLikeSettlementThresholdChoice.StoreSpeedPolicy;
             if (settings != null && settings.InvoiceSettledConfirmationThreshold is { } confirmations)
@@ -127,7 +127,7 @@ namespace BTCPayServer.Plugins.Monero.Controllers
                     !excludeFilters.Match(PaymentTypes.CHAIN.GetPaymentMethodId(cryptoCode)),
                 Summary = summary,
                 CryptoCode = cryptoCode,
-                AccountIndex = settings?.AccountIndex ?? accountsResponse?.SubaddressAccounts?.FirstOrDefault()?.AccountIndex ?? 0,
+                AccountIndex = settings?.AccountIndex ?? accountsResponse?.Accounts?.FirstOrDefault()?.AccountIndex ?? 0,
                 Accounts = accounts == null ? null : new SelectList(accounts, nameof(SelectListItem.Value),
                     nameof(SelectListItem.Text)),
                 SettlementConfirmationThresholdChoice = settlementThresholdChoice,
@@ -223,10 +223,6 @@ namespace BTCPayServer.Plugins.Monero.Controllers
                             RestoreHeight = viewModel.RestoreHeight,
                             Password = viewModel.WalletPassword
                         });
-                        if (response?.Error != null)
-                        {
-                            throw new GenerateFromKeysException(response.Error.Message);
-                        }
                     }
                     catch (Exception ex)
                     {
@@ -299,7 +295,7 @@ namespace BTCPayServer.Plugins.Monero.Controllers
             [Display(Name = "Private View Key")]
             public string PrivateViewKey { get; set; }
             [Display(Name = "Restore Height")]
-            public int RestoreHeight { get; set; }
+            public uint RestoreHeight { get; set; }
             [Display(Name = "Wallet Password")]
             public string WalletPassword { get; set; }
             [Display(Name = "Consider the invoice settled when the payment transaction …")]
