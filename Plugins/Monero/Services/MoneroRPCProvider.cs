@@ -15,8 +15,6 @@ using Monero.Wallet.Rpc;
 
 using NBitcoin;
 
-// using NBitcoin;
-
 namespace BTCPayServer.Plugins.Monero.Services
 {
     public class MoneroRPCProvider
@@ -69,8 +67,8 @@ namespace BTCPayServer.Plugins.Monero.Services
                 throw new InvalidOperationException($"Wallet RPC client not found for {cryptoCode}");
             }
 
-            await walletRpcClient.SendCommandAsync<JsonRpcClient.NoRequestModel, object>(
-                "close_wallet", JsonRpcClient.NoRequestModel.Instance);
+            await walletRpcClient.SendCommandAsync<NoRequestModel, object>(
+                "close_wallet", NoRequestModel.Instance);
         }
 
         public void DeleteWallet()
