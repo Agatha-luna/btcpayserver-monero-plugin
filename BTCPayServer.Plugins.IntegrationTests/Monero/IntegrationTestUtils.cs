@@ -16,24 +16,27 @@ public static class IntegrationTestUtils
         .Create(builder => builder.AddConsole())
         .CreateLogger("IntegrationTestUtils");
 
-    public static async Task CleanUpAsync(PlaywrightTester playwrightTester)
+    public static async Task CleanUpAsync(PlaywrightTester playwrightTester, bool deleteWalletFiles = true)
     {
-        MoneroRPCProvider moneroRpcProvider = playwrightTester.Server.PayTester.GetService<MoneroRPCProvider>();
-        if (moneroRpcProvider.IsAvailable("XMR"))
-        {
-            await moneroRpcProvider.CloseWallet("XMR");
-        }
+        var moneroRpcProvider = playwrightTester.Server.PayTester.GetService<MoneroRPCProvider>();
+        await moneroRpcProvider.CloseWallet("XMR");
 
         if (playwrightTester.Server.PayTester.InContainer)
         {
-            moneroRpcProvider.DeleteWallet();
+            if (deleteWalletFiles)
+            {
+                moneroRpcProvider.DeleteAllWallets();
+            }
             await DropDatabaseAsync(
                 "btcpayserver",
                 "Host=postgres;Port=5432;Username=postgres;Database=postgres");
         }
         else
         {
-            await RemoveWalletFromLocalDocker();
+            if (deleteWalletFiles)
+            {
+                await RemoveWalletFromLocalDocker();
+            }
             await DropDatabaseAsync(
                 "btcpayserver",
                 "Host=localhost;Port=39372;Username=postgres;Database=postgres");
