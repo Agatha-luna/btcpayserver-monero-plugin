@@ -37,6 +37,7 @@ namespace BTCPayServer.Plugins.Monero.Services
         private readonly PaymentMethodHandlerDictionary _handlers;
         private readonly InvoiceActivator _invoiceActivator;
         private readonly PaymentService _paymentService;
+        private Timer _pollingTimer;
 
         public MoneroListener(InvoiceRepository invoiceRepository,
             EventAggregator eventAggregator,
@@ -57,6 +58,38 @@ namespace BTCPayServer.Plugins.Monero.Services
             _handlers = handlers;
             _invoiceActivator = invoiceActivator;
             _paymentService = paymentService;
+        }
+
+        public override Task StartAsync(CancellationToken cancellationToken)
+        {
+            _pollingTimer = new Timer(async _ =>
+            {
+                try
+                {
+                    foreach (var crypto in _moneroRpcProvider.WalletRpcClients.Keys)
+                    {
+                        if (_moneroRpcProvider.IsAvailable(crypto))
+                        {
+                            await UpdateAnyPendingMoneroLikePayment(crypto);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error while polling Monero confirmations");
+                }
+            },
+            null,
+            TimeSpan.FromSeconds(30),   // first run
+            TimeSpan.FromSeconds(30));  // interval
+
+            return base.StartAsync(cancellationToken);
+        }
+
+        public override Task StopAsync(CancellationToken cancellationToken)
+        {
+            _pollingTimer?.Dispose();
+            return base.StopAsync(cancellationToken);
         }
 
         protected override void SubscribeToEvents()
@@ -127,6 +160,19 @@ namespace BTCPayServer.Plugins.Monero.Services
             }
 
             var moneroWalletRpcClient = _moneroRpcProvider.WalletRpcClients[cryptoCode];
+
+            try
+            {
+                await moneroWalletRpcClient.SendCommandAsync<object, object>(
+            "refresh",
+            new { });
+
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Monero] Wallet refresh failed");
+            }
+
             var network = _networkProvider.GetNetwork(cryptoCode);
             var paymentId = PaymentTypes.CHAIN.GetPaymentMethodId(network.CryptoCode);
             var handler = (MoneroLikePaymentMethodHandler)_handlers[paymentId];
@@ -177,6 +223,41 @@ namespace BTCPayServer.Plugins.Monero.Services
             var transferProcessingTasks = new List<Task>();
 
             var updatedPaymentEntities = new List<(PaymentEntity Payment, InvoiceEntity invoice)>();
+
+            // UPDATE CONFIRMATIONS FOR EXISTING PAYMENTS
+            foreach (var invoice in invoices)
+            {
+                var existingPayments = GetAllMoneroLikePayments(invoice, cryptoCode);
+
+                foreach (var payment in existingPayments)
+                {
+                    var existingHandler = (MoneroLikePaymentMethodHandler)_handlers[payment.PaymentMethodId];
+                    var paymentDetails = existingHandler.ParsePaymentDetails(payment.Details);
+
+                    var transfer = await GetTransferByTxId(
+                        cryptoCode,
+                        paymentDetails.TransactionId,
+                        CancellationToken.None);
+
+                    if (transfer?.Transfer == null)
+                    {
+                        continue;
+                    }
+
+                    await HandlePaymentData(
+                        cryptoCode,
+                        transfer.Transfer.Amount,
+                        paymentDetails.SubaccountIndex,
+                        paymentDetails.SubaddressIndex,
+                        transfer.Transfer.Txid,
+                        transfer.Transfer.Confirmations,
+                        transfer.Transfer.Height,
+                        transfer.Transfer.UnlockTime,
+                        invoice,
+                        updatedPaymentEntities);
+                }
+            }
+
             foreach (var keyValuePair in tasks)
             {
                 var transfers = keyValuePair.Value.Result.IncomingTransfers;
